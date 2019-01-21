@@ -1,0 +1,118 @@
+FROM centos:7
+MAINTAINER mmirecki@redhat.com
+ENV container docker
+
+# Install docker
+RUN yum -y update && yum clean all
+
+RUN yum -y install btrfs-progs \
+		e2fsprogs \
+		iptables \
+		xfsprogs \
+ 		pigz \
+ 		wget \
+ 		yum-utils \
+        device-mapper-persistent-data \
+        lvm2 \
+ 		which && yum clean all
+
+RUN yum-config-manager \
+        --add-repo \
+        https://download.docker.com/linux/centos/docker-ce.repo
+
+RUN yum install docker-ce -y && yum clean all
+
+RUN set -x \
+	&& groupadd dockremap \
+	&& useradd -g dockremap dockremap \
+	&& echo 'dockremap:165536:65536' >> /etc/subuid \
+	&& echo 'dockremap:165536:65536' >> /etc/subgid
+
+#RUN set -eux; \
+#    \
+#    if ! wget -O docker.tgz "https://download.docker.com/linux/static/${DOCKER_CHANNEL}/${dockerArch}/docker-${DOCKER_VERSION}.tgz"; then \
+#		echo >&2 "error: failed to download 'docker-${DOCKER_VERSION}' from '${DOCKER_CHANNEL}' for '${dockerArch}'"; \
+#		exit 1; \
+#	fi; \
+#	\
+#	tar --extract \
+#		--file docker.tgz \
+#		--strip-components 1 \
+#		--directory /usr/local/bin/ \
+#	; \
+#	rm docker.tgz; \
+#	\
+#	dockerd --version; \
+#	docker --version
+
+# https://github.com/docker/docker/tree/master/hack/dind
+ENV DIND_COMMIT 52379fa76dee07ca038624d639d9e14f4fb719ff
+
+RUN set -eux; \
+	wget -O /usr/local/bin/dind "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind"; \
+	chmod +x /usr/local/bin/dind
+
+# Install Go
+RUN wget -O /tmp/golang.tar.gz "https://dl.google.com/go/go1.11.4.linux-amd64.tar.gz"; \
+    tar -C /usr/local -xzf /tmp/golang.tar.gz
+
+ENV PATH "$PATH:/usr/local/go/bin"
+
+RUN mkdir -p /go/src/kubevirt.io
+
+ENV GOPATH "/go/"
+
+COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
+
+## Set SELinux in permissive mode (effectively disabling it)
+#setenforce 0
+#sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+RUN yum install -y  kubeadm\
+                    kubelet\
+                    kubectl\
+                    kubernetes-cni\
+                    bind-utils\
+                    bridge-utils\
+                    ebtables\
+                    findutils\
+                    hostname\
+                    htop\
+                    iproute\
+                    iputils\
+                    less\
+                    net-tools\
+                    procps-ng\
+                    tcpdump\
+                    traceroute\
+                    which
+
+RUN yum install git gcc -y
+
+RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == \
+systemd-tmpfiles-setup.service ] || rm -f $i; done); \
+rm -f /lib/systemd/system/multi-user.target.wants/*;\
+rm -f /etc/systemd/system/*.wants/*;\
+rm -f /lib/systemd/system/local-fs.target.wants/*; \
+rm -f /lib/systemd/system/sockets.target.wants/*udev*; \
+rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
+rm -f /lib/systemd/system/basic.target.wants/*;\
+rm -f /lib/systemd/system/anaconda.target.wants/*;
+
+RUN systemctl enable kubelet
+RUN systemctl enable docker
+RUN rmdir /etc/kubernetes/manifests
+
+ENV PATH "$PATH:/usr/local/go/bin"
+
+# Install the magic wrapper.
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY modprobe.sh /usr/local/bin/modprobe
+COPY test_sriov.sh /test_sriov.sh
+
+# Define additional metadata for our image.
+VOLUME /var/lib/docker
+EXPOSE 2375
+
+CMD ["/usr/sbin/init"]
+
