@@ -5,6 +5,7 @@ for i in {1..10}
 do
   mkdir -p /var/local/kubevirt-storage/local-volume/disk${i}
   mkdir -p /mnt/local-storage/local/disk${i}
-  echo "/var/local/kubevirt-storage/local-volume/disk${i} /mnt/local-storage/local/disk${i} none defaults,bind 0 0" >> /etc/fstab
 done
 chmod -R 777 /var/local/kubevirt-storage/local-volume
+
+mknod /dev/loop0 b 7 0
